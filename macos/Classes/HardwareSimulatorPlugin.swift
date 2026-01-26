@@ -200,6 +200,18 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       }
   }
 
+  // Inject unicode text on macOS.
+  func PerformTextInput(text: String) {
+      guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else {
+          return
+      }
+      // Use CGEventKeyboardSetUnicodeString to type unicode text.
+      let utf16 = Array(text.utf16)
+      var chars = utf16
+      event.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
+      event.post(tap: .cghidEventTap)
+  }
+
   func performMouseMoveAbsl(x: Double, y: Double, screenId: Int) {
       let screens = NSScreen.screens
       guard screens.indices.contains(screenId) else {
@@ -620,6 +632,14 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for KeyPress", details: nil))
       }
+    case "TextInput":
+      if let args = call.arguments as? [String: Any],
+         let text = args["text"] as? String {
+        PerformTextInput(text: text)
+        result(nil)
+      } else {
+        result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for TextInput", details: nil))
+      }
     case "lockCursor":
       CGAssociateMouseAndMouseCursorPosition(0)
       NSCursor.hide()
@@ -768,4 +788,3 @@ func sha256ForAllBitmapReps(in image: NSImage) -> String {
     let hashString = hash.map { String(format: "%02x", $0) }.joined()
     return hashString
 }
-

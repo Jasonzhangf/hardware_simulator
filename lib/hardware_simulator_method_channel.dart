@@ -284,6 +284,13 @@ class MethodChannelHardwareSimulator extends HardwareSimulatorPlatform {
     });
   }
 
+  @override
+  Future<void> performTextInput(String text) async {
+    await methodChannel.invokeMethod('TextInput', {
+      'text': text,
+    });
+  }
+
   // Relative mouse movement.
   @override
   Future<void> performMouseMoveRelative(

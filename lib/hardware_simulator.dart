@@ -6,6 +6,10 @@ class HWKeyboard {
   void performKeyEvent(int keyCode, bool isDown) {
     HardwareSimulatorPlatform.instance.performKeyEvent(keyCode, isDown);
   }
+
+  Future<void> performTextInput(String text) {
+    return HardwareSimulatorPlatform.instance.performTextInput(text);
+  }
 }
 
 class HWMouse {
