@@ -430,6 +430,53 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       NSLog("[HW] Window with ID \(windowId) not found for click")
   }
 
+  func performMouseMoveToWindow(windowId: Int, percentX: Double, percentY: Double) {
+      if !ensureWindowFocused(cgWindowID: windowId) {
+          NSLog("[HW] mouseMoveToWindow: ensureWindowFocused failed windowId=\(windowId)")
+          return
+      }
+
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          NSLog("[HW] mouseMoveToWindow: Failed to get window list")
+          return
+      }
+
+      for windowInfo in windowInfoList {
+          if let windowID = windowInfo[kCGWindowNumber as String] as? Int,
+             windowID == windowId,
+             let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any] {
+              let bounds = CGRect(
+                  x: boundsDict["X"] as? CGFloat ?? 0,
+                  y: boundsDict["Y"] as? CGFloat ?? 0,
+                  width: boundsDict["Width"] as? CGFloat ?? 0,
+                  height: boundsDict["Height"] as? CGFloat ?? 0
+              )
+              let targetX = bounds.origin.x + (percentX * bounds.width)
+              let targetY = bounds.origin.y + (percentY * bounds.height)
+
+              var eventType: CGEventType = .mouseMoved
+              let pressedButtons = NSEvent.pressedMouseButtons
+              if pressedButtons & (1 << 0) != 0 {
+                  eventType = .leftMouseDragged
+              } else if pressedButtons & (1 << 1) != 0 {
+                  eventType = .rightMouseDragged
+              }
+
+              let eventSource = CGEventSource(stateID: .hidSystemState)
+              if let moveEvent = CGEvent(mouseEventSource: eventSource,
+                                         mouseType: eventType,
+                                         mouseCursorPosition: CGPoint(x: targetX, y: targetY),
+                                         mouseButton: .left) {
+                  moveEvent.post(tap: .cghidEventTap)
+              }
+              return
+          }
+      }
+
+      NSLog("[HW] mouseMoveToWindow: Window with ID \(windowId) not found")
+  }
+
   func performMouseScroll(dx: Double, dy: Double) {
       let eventSource = CGEventSource(stateID: .hidSystemState)
       
@@ -1015,6 +1062,16 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
         result(nil)
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for mouseClickToWindow", details: nil))
+      }
+    case "mouseMoveToWindow":
+      if let args = call.arguments as? [String: Any],
+        let windowId = args["windowId"] as? Int,
+        let percentX = args["percentX"] as? Double,
+        let percentY = args["percentY"] as? Double {
+        performMouseMoveToWindow(windowId: windowId, percentX: percentX, percentY: percentY)
+        result(nil)
+      } else {
+        result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for mouseMoveToWindow", details: nil))
       }
     case "mouseScroll":
       if let args = call.arguments as? [String: Any],
