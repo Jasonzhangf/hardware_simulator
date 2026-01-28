@@ -13,6 +13,10 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   private var methodChannel: FlutterMethodChannel?
   private var defaultCursorHasher: CursorHasher?
   private var currentScreenId: Int = 0
+  private var lastEnsuredWindowId: Int?
+  private var lastEnsuredOwnerPID: pid_t = 0
+  private var lastEnsuredAt: TimeInterval = 0
+  private var lastFocusLogAt: TimeInterval = 0
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "hardware_simulator", binaryMessenger: registrar.messenger)
@@ -202,7 +206,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   func PerformKeyEventToWindow(windowId: Int, code: Int, isDown: Bool) {
-      if !ensureWindowFocused(cgWindowID: windowId) {
+      if !ensureWindowFocused(cgWindowID: windowId, throttleInterval: 0.25) {
           NSLog("[HW] KeyPressToWindow: ensureWindowFocused failed windowId=\(windowId)")
           return
       }
@@ -261,7 +265,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
 
   // Activate a target window then inject unicode text (best effort).
   func PerformTextInputToWindow(windowId: Int, text: String) {
-      if !ensureWindowFocused(cgWindowID: windowId) {
+      if !ensureWindowFocused(cgWindowID: windowId, throttleInterval: 0.25) {
           NSLog("[HW] TextInputToWindow: ensureWindowFocused failed windowId=\(windowId)")
           return
       }
@@ -372,7 +376,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       NSLog("[HW] performMouseClickToWindow called: windowId=\(windowId), percentX=\(percentX), percentY=\(percentY), buttonId=\(buttonId), isDown=\(isDown)")
 
       // Make sure the target window/app is frontmost; otherwise the CGEvent will go to the wrong app.
-      if !ensureWindowFocused(cgWindowID: windowId) {
+      if !ensureWindowFocused(cgWindowID: windowId, throttleInterval: 0.15) {
           NSLog("[HW] performMouseClickToWindow: ensureWindowFocused failed windowId=\(windowId)")
           return
       }
@@ -431,11 +435,6 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   func performMouseMoveToWindow(windowId: Int, percentX: Double, percentY: Double) {
-      if !ensureWindowFocused(cgWindowID: windowId) {
-          NSLog("[HW] mouseMoveToWindow: ensureWindowFocused failed windowId=\(windowId)")
-          return
-      }
-
       let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW] mouseMoveToWindow: Failed to get window list")
@@ -490,7 +489,14 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   func performMouseScrollToWindow(windowId: Int, dx: Double, dy: Double) {
-      if !ensureWindowFocused(cgWindowID: windowId) {
+      // Scroll is high-frequency; avoid repeated frontmost/AX work & log spam.
+      // Best-effort: if we recently tried to focus the same window, proceed anyway.
+      if !ensureWindowFocused(
+          cgWindowID: windowId,
+          throttleInterval: 0.6,
+          waitForFrontmostApp: false,
+          soft: true
+      ) {
           NSLog("[HW] mouseScrollToWindow: ensureWindowFocused failed windowId=\(windowId)")
           return
       }
@@ -561,7 +567,12 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       return nil
   }
 
-  private func ensureWindowFocused(cgWindowID: Int) -> Bool {
+  private func ensureWindowFocused(
+      cgWindowID: Int,
+      throttleInterval: TimeInterval = 0.35,
+      waitForFrontmostApp: Bool = true,
+      soft: Bool = false
+  ) -> Bool {
       let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW][FOCUS] Failed to get window list")
@@ -576,10 +587,31 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
           return false
       }
 
+      let now = Date().timeIntervalSince1970
       let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+      // Fast path: avoid spamming focus/AX during high-frequency input (e.g. scroll).
+      // - If target is already frontmost: return quickly.
+      // - For "soft" calls (e.g. scroll), allow proceeding even if not frontmost (best effort),
+      //   but still rate-limit the focus work.
+      if lastEnsuredWindowId == cgWindowID,
+         lastEnsuredOwnerPID == ownerPID,
+         (now - lastEnsuredAt) < throttleInterval {
+          if soft { return true }
+          return frontmostPID == ownerPID
+      }
+
+      // Always record attempt timestamp so failures don't spam.
+      lastEnsuredWindowId = cgWindowID
+      lastEnsuredOwnerPID = ownerPID
+      lastEnsuredAt = now
+
+      var didActivate = false
+      var activateOk = false
+      var didRaise = false
+      var raiseOk: Bool? = nil
       if frontmostPID != ownerPID {
-          let ok = activateOwnerApp(ownerPID: ownerPID)
-          NSLog("[HW][FOCUS] activateOwnerApp pid=\(ownerPID) ok=\(ok) frontmostWas=\(frontmostPID)")
+          activateOk = activateOwnerApp(ownerPID: ownerPID)
+          didActivate = true
       }
 
       // Best-effort AX: make app frontmost and focus the right window.
@@ -643,22 +675,36 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
           _ = AXUIElementSetAttributeValue(app, kAXFocusedWindowAttribute as CFString, w)
           _ = AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
           _ = AXUIElementSetAttributeValue(w, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-          let raiseOk = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success
-          NSLog("[HW][FOCUS] raise ok=\(raiseOk) windowId=\(cgWindowID) pid=\(ownerPID)")
+          didRaise = true
+          raiseOk = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success
       } else {
           // As a last resort, raise focused window.
           var focusedRef: CFTypeRef?
           if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
              let focusedAny = focusedRef {
               let focused: AXUIElement = unsafeBitCast(focusedAny, to: AXUIElement.self)
-              let raiseOk = AXUIElementPerformAction(focused, kAXRaiseAction as CFString) == .success
-              NSLog("[HW][FOCUS] raise focused ok=\(raiseOk) windowId=\(cgWindowID) pid=\(ownerPID)")
+              didRaise = true
+              raiseOk = AXUIElementPerformAction(focused, kAXRaiseAction as CFString) == .success
           } else {
               NSLog("[HW][FOCUS] no focused window pid=\(ownerPID)")
           }
       }
+      // Avoid log spam during scroll/move; only log on meaningful events and rate-limit.
+      if (didActivate || (didRaise && (raiseOk == false))) && (now - lastFocusLogAt) > 0.8 {
+          lastFocusLogAt = now
+          if didActivate {
+              NSLog("[HW][FOCUS] activateOwnerApp pid=\(ownerPID) ok=\(activateOk) frontmostWas=\(frontmostPID)")
+          }
+          if didRaise, let ok = raiseOk {
+              NSLog("[HW][FOCUS] raise ok=\(ok) windowId=\(cgWindowID) pid=\(ownerPID)")
+          }
+      }
 
-      return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 500)
+      if soft { return true }
+      if waitForFrontmostApp {
+          return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 200)
+      }
+      return NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID
   }
 
   private func waitForFrontmost(ownerPID: pid_t, timeoutMs: Int) -> Bool {
