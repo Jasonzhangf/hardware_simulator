@@ -1,6 +1,7 @@
 import Cocoa
-import FlutterMacOS 
+import FlutterMacOS
 import CommonCrypto
+import ApplicationServices
 
 class CursorConstants {    
   static let cursorUpdatedDefault = 3    
@@ -200,6 +201,14 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       }
   }
 
+  func PerformKeyEventToWindow(windowId: Int, code: Int, isDown: Bool) {
+      if !ensureWindowFocused(cgWindowID: windowId) {
+          NSLog("[HW] KeyPressToWindow: ensureWindowFocused failed windowId=\(windowId)")
+          return
+      }
+      PerformKeyEvent(code: code, isDown: isDown)
+  }
+
   // Inject unicode text on macOS.
   func PerformTextInput(text: String) {
       guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else {
@@ -210,6 +219,15 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       var chars = utf16
       event.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
       event.post(tap: .cghidEventTap)
+  }
+
+  // Activate a target window then inject unicode text (best effort).
+  func PerformTextInputToWindow(windowId: Int, text: String) {
+      if !ensureWindowFocused(cgWindowID: windowId) {
+          NSLog("[HW] TextInputToWindow: ensureWindowFocused failed windowId=\(windowId)")
+          return
+      }
+      PerformTextInput(text: text)
   }
 
   func performMouseMoveAbsl(x: Double, y: Double, screenId: Int) {
@@ -303,11 +321,75 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
                                   mouseCursorPosition: currentLocation, 
                                   mouseButton: mouseButton)
           
-          // 发送事件
-          mouseEvent?.post(tap: .cghidEventTap)
+          // 发送事件（禁用，避免透传）
+          // mouseEvent?.post(tap: .cghidEventTap)
+          print("[HW] performMouseButton called (CGEvent injection DISABLED): buttonId=\(buttonId), isDown=\(isDown)")
       } else {
           print("Failed to get current mouse location")
       }
+  }
+
+  // Window-relative click (disabled CGEvent injection for now)
+  func performMouseClickToWindow(windowId: Int, percentX: Double, percentY: Double, buttonId: Int, isDown: Bool) {
+      NSLog("[HW] performMouseClickToWindow called: windowId=\(windowId), percentX=\(percentX), percentY=\(percentY), buttonId=\(buttonId), isDown=\(isDown)")
+
+      // Make sure the target window/app is frontmost; otherwise the CGEvent will go to the wrong app.
+      if !ensureWindowFocused(cgWindowID: windowId) {
+          NSLog("[HW] performMouseClickToWindow: ensureWindowFocused failed windowId=\(windowId)")
+          return
+      }
+
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          NSLog("[HW] Failed to get window list")
+          return
+      }
+
+      for windowInfo in windowInfoList {
+          if let windowID = windowInfo[kCGWindowNumber as String] as? Int,
+             windowID == windowId,
+             let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any] {
+              let bounds = CGRect(
+                  x: boundsDict["X"] as? CGFloat ?? 0,
+                  y: boundsDict["Y"] as? CGFloat ?? 0,
+                  width: boundsDict["Width"] as? CGFloat ?? 0,
+                  height: boundsDict["Height"] as? CGFloat ?? 0
+              )
+              let targetX = bounds.origin.x + (percentX * bounds.width)
+              // CGWindow bounds and CGEvent mouse locations are in the same global
+              // display coordinate system (origin at top-left, y increases downward).
+              let targetY = bounds.origin.y + (percentY * bounds.height)
+
+              var mouseEventType: CGEventType
+              var mouseButton: CGMouseButton
+              if buttonId == 1 {
+                  mouseButton = .left
+                  mouseEventType = isDown ? .leftMouseDown : .leftMouseUp
+              } else if buttonId == 3 {
+                  mouseButton = .right
+                  mouseEventType = isDown ? .rightMouseDown : .rightMouseUp
+              } else {
+                  NSLog("[HW] Unsupported buttonId: \(buttonId)")
+                  return
+              }
+
+              let eventSource = CGEventSource(stateID: .hidSystemState)
+              if let mouseEvent = CGEvent(mouseEventSource: eventSource,
+                                          mouseType: mouseEventType,
+                                          mouseCursorPosition: CGPoint(x: targetX, y: targetY),
+                                          mouseButton: mouseButton) {
+                  // Try AX press on focused element first; fallback to CGEvent.
+                  let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t ?? 0
+                  let axOk = axPerformClick(ownerPID: ownerPID, x: targetX, y: targetY)
+                  if !axOk {
+                      mouseEvent.post(tap: .cghidEventTap)
+                      NSLog("[HW] Posted CGEvent click at window position: \(targetX), \(targetY)")
+                  }
+              }
+              return
+          }
+      }
+      NSLog("[HW] Window with ID \(windowId) not found for click")
   }
 
   func performMouseScroll(dx: Double, dy: Double) {
@@ -320,6 +402,262 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       if dx != 0, let scrollEventX = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 1, wheel1: 0, wheel2: Int32(dx), wheel3: 0) {
           scrollEventX.post(tap: .cghidEventTap)
       }
+  }
+
+  // Activate window by CGWindowID
+  func activateWindow(cgWindowID: Int) -> Bool {
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          NSLog("[HW] Failed to get window list")
+          return false
+      }
+
+      for windowInfo in windowInfoList {
+          if let windowID = windowInfo[kCGWindowNumber as String] as? Int,
+             windowID == cgWindowID,
+             let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t {
+              if let runningApp = NSRunningApplication(processIdentifier: ownerPID) {
+                  let ok = runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                  NSLog("[HW] activateWindow cgWindowID=\(cgWindowID) pid=\(ownerPID) ok=\(ok)")
+                  return ok
+              }
+          }
+      }
+
+      NSLog("[HW] Window with CGWindowID \(cgWindowID) not found")
+      return false
+  }
+
+  private func activateOwnerApp(ownerPID: pid_t) -> Bool {
+      guard ownerPID != 0, let runningApp = NSRunningApplication(processIdentifier: ownerPID) else {
+          return false
+      }
+      return runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+  }
+
+  private func windowOwnerPID(cgWindowID: Int) -> pid_t? {
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          return nil
+      }
+      for windowInfo in windowInfoList {
+          if let windowID = windowInfo[kCGWindowNumber as String] as? Int,
+             windowID == cgWindowID,
+             let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t {
+              return ownerPID
+          }
+      }
+      return nil
+  }
+
+  private func ensureWindowFocused(cgWindowID: Int) -> Bool {
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          NSLog("[HW][FOCUS] Failed to get window list")
+          return false
+      }
+      guard let target = windowInfoList.first(where: { ($0[kCGWindowNumber as String] as? Int) == cgWindowID }) else {
+          NSLog("[HW][FOCUS] Window not found: \(cgWindowID)")
+          return false
+      }
+      guard let ownerPID = target[kCGWindowOwnerPID as String] as? pid_t else {
+          NSLog("[HW][FOCUS] Missing owner PID for window \(cgWindowID)")
+          return false
+      }
+
+      let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+      if frontmostPID != ownerPID {
+          let ok = activateOwnerApp(ownerPID: ownerPID)
+          NSLog("[HW][FOCUS] activateOwnerApp pid=\(ownerPID) ok=\(ok) frontmostWas=\(frontmostPID)")
+      }
+
+      // Best-effort AX: make app frontmost and focus the right window.
+      let app = AXUIElementCreateApplication(ownerPID)
+      _ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+
+      var windowsRef: CFTypeRef?
+      let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsRef)
+      if err != .success {
+          NSLog("[HW][FOCUS] AXUIElementCopyAttributeValue(kAXWindows) failed err=\(err.rawValue)")
+          // Even without AX, activation may still have worked.
+          return NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID
+      }
+      guard let windows = windowsRef as? [AXUIElement] else {
+          NSLog("[HW][FOCUS] windowsRef not an array")
+          return NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID
+      }
+
+      let cgTitle = target[kCGWindowName as String] as? String
+      let boundsDict = target[kCGWindowBounds as String] as? [String: Any]
+      let cgBounds = CGRect(
+          x: boundsDict?["X"] as? CGFloat ?? 0,
+          y: boundsDict?["Y"] as? CGFloat ?? 0,
+          width: boundsDict?["Width"] as? CGFloat ?? 0,
+          height: boundsDict?["Height"] as? CGFloat ?? 0
+      )
+
+      func axWindowMatches(_ w: AXUIElement) -> Bool {
+          if let cgTitle, !cgTitle.isEmpty {
+              var titleRef: CFTypeRef?
+              if AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &titleRef) == .success,
+                 let title = titleRef as? String,
+                 title == cgTitle {
+                  return true
+              }
+          }
+          // Fallback match by bounds (best effort).
+          var posRef: CFTypeRef?
+          var sizeRef: CFTypeRef?
+          guard AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &posRef) == .success,
+                AXUIElementCopyAttributeValue(w, kAXSizeAttribute as CFString, &sizeRef) == .success,
+                let posAny = posRef,
+                let sizeAny = sizeRef else {
+              return false
+          }
+          var pos = CGPoint.zero
+          var size = CGSize.zero
+          let posVal = posAny as! AXValue
+          let sizeVal = sizeAny as! AXValue
+          AXValueGetValue(posVal, .cgPoint, &pos)
+          AXValueGetValue(sizeVal, .cgSize, &size)
+          let axBounds = CGRect(origin: pos, size: size)
+          let tol: CGFloat = 4
+          return abs(axBounds.origin.x - cgBounds.origin.x) <= tol &&
+                 abs(axBounds.origin.y - cgBounds.origin.y) <= tol &&
+                 abs(axBounds.size.width - cgBounds.size.width) <= tol &&
+                 abs(axBounds.size.height - cgBounds.size.height) <= tol
+      }
+
+      if let w = windows.first(where: axWindowMatches) {
+          _ = AXUIElementSetAttributeValue(app, kAXFocusedWindowAttribute as CFString, w)
+          _ = AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
+          _ = AXUIElementSetAttributeValue(w, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+          let raiseOk = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success
+          NSLog("[HW][FOCUS] raise ok=\(raiseOk) windowId=\(cgWindowID) pid=\(ownerPID)")
+      } else {
+          // As a last resort, raise focused window.
+          var focusedRef: CFTypeRef?
+          if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+             let focusedAny = focusedRef {
+              let focused: AXUIElement = unsafeBitCast(focusedAny, to: AXUIElement.self)
+              let raiseOk = AXUIElementPerformAction(focused, kAXRaiseAction as CFString) == .success
+              NSLog("[HW][FOCUS] raise focused ok=\(raiseOk) windowId=\(cgWindowID) pid=\(ownerPID)")
+          } else {
+              NSLog("[HW][FOCUS] no focused window pid=\(ownerPID)")
+          }
+      }
+
+      return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 500)
+  }
+
+  private func waitForFrontmost(ownerPID: pid_t, timeoutMs: Int) -> Bool {
+      if NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID {
+          return true
+      }
+      let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+      while Date() < deadline {
+          RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+          if NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID {
+              return true
+          }
+      }
+      return NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID
+  }
+
+  private func axPerformClick(ownerPID: pid_t, x: CGFloat, y: CGFloat) -> Bool {
+      // Hit-test the element under (x,y) and perform press.
+      var hitRef: AXUIElement?
+      var hitErr: AXError = .failure
+      if ownerPID != 0 {
+          let app = AXUIElementCreateApplication(ownerPID)
+          hitErr = AXUIElementCopyElementAtPosition(app, Float(x), Float(y), &hitRef)
+      }
+      if hitErr != .success || hitRef == nil {
+          let systemWide = AXUIElementCreateSystemWide()
+          hitErr = AXUIElementCopyElementAtPosition(systemWide, Float(x), Float(y), &hitRef)
+      }
+      if hitErr != .success {
+          NSLog("[HW][AX] CopyElementAtPosition failed err=\(hitErr.rawValue)")
+          return false
+      }
+      guard let hit = hitRef else {
+          NSLog("[HW][AX] CopyElementAtPosition returned nil")
+          return false
+      }
+
+      // Only attempt press when the element actually supports it; otherwise fall back to CGEvent.
+      var actionNames: CFArray?
+      let actionsErr = AXUIElementCopyActionNames(hit, &actionNames)
+      if actionsErr == .success,
+         let actions = actionNames as? [String],
+         actions.contains(kAXPressAction as String) {
+          let pressErr = AXUIElementPerformAction(hit, kAXPressAction as CFString)
+          if pressErr == .success {
+              return true
+          }
+          // -25206 == AXError.actionUnsupported: expected for many non-pressable elements.
+          if pressErr != .actionUnsupported {
+              NSLog("[HW][AX] PressAction failed err=\(pressErr.rawValue)")
+          }
+          return false
+      }
+      return false
+  }
+
+  private func activateWindowAX(cgWindowID: Int) -> Bool {
+      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      guard let windowInfoList = windowList as? [[String: Any]] else {
+          NSLog("[HW][AX] Failed to get window list")
+          return false
+      }
+      guard let target = windowInfoList.first(where: { ($0[kCGWindowNumber as String] as? Int) == cgWindowID }) else {
+          NSLog("[HW][AX] Window not found: \(cgWindowID)")
+          return false
+      }
+      guard let ownerPID = target[kCGWindowOwnerPID as String] as? pid_t else {
+          NSLog("[HW][AX] Missing owner PID for window \(cgWindowID)")
+          return false
+      }
+
+      let app = AXUIElementCreateApplication(ownerPID)
+      var windowsRef: CFTypeRef?
+      let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsRef)
+      if err != .success {
+          NSLog("[HW][AX] AXUIElementCopyAttributeValue(kAXWindows) failed err=\(err.rawValue)")
+          return false
+      }
+      guard let windows = windowsRef as? [AXUIElement] else {
+          NSLog("[HW][AX] windowsRef not an array")
+          return false
+      }
+
+      // Match by title first (best effort)
+      let cgTitle = target[kCGWindowName as String] as? String
+      for w in windows {
+          var titleRef: CFTypeRef?
+          if AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &titleRef) == .success,
+             let title = titleRef as? String {
+              if let cgTitle, !cgTitle.isEmpty {
+                  if title == cgTitle {
+                      let ok = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success
+                      NSLog("[HW][AX] raise by title ok=\(ok) title=\(title)")
+                      return ok
+                  }
+              }
+          }
+      }
+
+      // Fallback: raise focused window
+      var focusedRef: CFTypeRef?
+      if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+         let focusedAny = focusedRef {
+          let focused: AXUIElement = unsafeBitCast(focusedAny, to: AXUIElement.self)
+          let ok = AXUIElementPerformAction(focused, kAXRaiseAction as CFString) == .success
+          NSLog("[HW][AX] raise focused window ok=\(ok) pid=\(ownerPID)")
+          return ok
+      }
+      NSLog("[HW][AX] no focused window for pid=\(ownerPID)")
+      return false
   }
 
   func performMouseMoveToWindowPosition(percentx: Double, percenty: Double) {
@@ -602,6 +940,18 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for Mouse Press", details: nil))
       }
+    case "mouseClickToWindow":
+      if let args = call.arguments as? [String: Any],
+        let windowId = args["windowId"] as? Int,
+        let percentX = args["percentX"] as? Double,
+        let percentY = args["percentY"] as? Double,
+        let buttonId = args["buttonId"] as? Int,
+        let isDown = args["isDown"] as? Bool {
+        performMouseClickToWindow(windowId: windowId, percentX: percentX, percentY: percentY, buttonId: buttonId, isDown: isDown)
+        result(nil)
+      } else {
+        result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for mouseClickToWindow", details: nil))
+      }
     case "mouseScroll":
       if let args = call.arguments as? [String: Any],
         let dx = args["dx"] as? Double,
@@ -632,6 +982,16 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for KeyPress", details: nil))
       }
+    case "KeyPressToWindow":
+        if let args = call.arguments as? [String: Any],
+        let windowId = args["windowId"] as? Int,
+        let keyCode = args["code"] as? Int,
+        let isDown = args["isDown"] as? Bool {
+        PerformKeyEventToWindow(windowId: windowId, code: keyCode, isDown: isDown)
+        result(nil)
+      } else {
+        result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for KeyPressToWindow", details: nil))
+      }
     case "TextInput":
       if let args = call.arguments as? [String: Any],
          let text = args["text"] as? String {
@@ -639,6 +999,15 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
         result(nil)
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for TextInput", details: nil))
+      }
+    case "TextInputToWindow":
+      if let args = call.arguments as? [String: Any],
+         let windowId = args["windowId"] as? Int,
+         let text = args["text"] as? String {
+        PerformTextInputToWindow(windowId: windowId, text: text)
+        result(nil)
+      } else {
+        result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for TextInputToWindow", details: nil))
       }
     case "lockCursor":
       CGAssociateMouseAndMouseCursorPosition(0)

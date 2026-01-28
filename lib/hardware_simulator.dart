@@ -7,8 +7,39 @@ class HWKeyboard {
     HardwareSimulatorPlatform.instance.performKeyEvent(keyCode, isDown);
   }
 
+  Future<void> performKeyEventToWindow({
+    required int windowId,
+    required int keyCode,
+    required bool isDown,
+  }) async {
+    try {
+      await HardwareSimulatorPlatform.instance.performKeyEventToWindow(
+        windowId: windowId,
+        keyCode: keyCode,
+        isDown: isDown,
+      );
+    } on UnimplementedError {
+      performKeyEvent(keyCode, isDown);
+    }
+  }
+
   Future<void> performTextInput(String text) {
     return HardwareSimulatorPlatform.instance.performTextInput(text);
+  }
+
+  Future<void> performTextInputToWindow({
+    required int windowId,
+    required String text,
+  }) async {
+    try {
+      await HardwareSimulatorPlatform.instance.performTextInputToWindow(
+        windowId: windowId,
+        text: text,
+      );
+    } on UnimplementedError {
+      // Fallback to non-window-targeted injection on platforms that don't support it.
+      await performTextInput(text);
+    }
   }
 }
 
@@ -24,6 +55,18 @@ class HWMouse {
         .performMouseMoveAbsl(percentx, percenty, screenId);
   }
 
+  void performMouseMoveToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+  }) {
+    HardwareSimulatorPlatform.instance.performMouseMoveToWindow(
+      windowId: windowId,
+      percentX: percentX,
+      percentY: percentY,
+    );
+  }
+
   void performMouseMoveToWindowPosition(double percentx, double percenty) {
     HardwareSimulatorPlatform.instance
         .performMouseMoveToWindowPosition(percentx, percenty);
@@ -32,6 +75,22 @@ class HWMouse {
   // mouse left button id 1, right button id 3
   void performMouseClick(int buttonId, bool isDown) {
     HardwareSimulatorPlatform.instance.performMouseClick(buttonId, isDown);
+  }
+
+  void performMouseClickToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+    required int buttonId,
+    required bool isDown,
+  }) {
+    HardwareSimulatorPlatform.instance.performMouseClickToWindow(
+      windowId: windowId,
+      percentX: percentX,
+      percentY: percentY,
+      buttonId: buttonId,
+      isDown: isDown,
+    );
   }
 
   void performMouseScroll(double dx, double dy) {

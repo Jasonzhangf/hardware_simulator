@@ -285,8 +285,32 @@ class MethodChannelHardwareSimulator extends HardwareSimulatorPlatform {
   }
 
   @override
+  Future<void> performKeyEventToWindow({
+    required int windowId,
+    required int keyCode,
+    required bool isDown,
+  }) async {
+    await methodChannel.invokeMethod('KeyPressToWindow', {
+      'windowId': windowId,
+      'code': keyCode,
+      'isDown': isDown,
+    });
+  }
+
+  @override
   Future<void> performTextInput(String text) async {
     await methodChannel.invokeMethod('TextInput', {
+      'text': text,
+    });
+  }
+
+  @override
+  Future<void> performTextInputToWindow({
+    required int windowId,
+    required String text,
+  }) async {
+    await methodChannel.invokeMethod('TextInputToWindow', {
+      'windowId': windowId,
       'text': text,
     });
   }
@@ -335,6 +359,36 @@ class MethodChannelHardwareSimulator extends HardwareSimulatorPlatform {
     await methodChannel.invokeMethod('mouseScroll', {
       'dx': dx,
       'dy': dy,
+    });
+  }
+
+  @override
+  Future<void> performMouseMoveToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+  }) async {
+    await methodChannel.invokeMethod('mouseMoveToWindow', {
+      'windowId': windowId,
+      'percentX': percentX,
+      'percentY': percentY,
+    });
+  }
+
+  @override
+  Future<void> performMouseClickToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+    required int buttonId,
+    required bool isDown,
+  }) async {
+    await methodChannel.invokeMethod('mouseClickToWindow', {
+      'windowId': windowId,
+      'percentX': percentX,
+      'percentY': percentY,
+      'buttonId': buttonId,
+      'isDown': isDown,
     });
   }
 

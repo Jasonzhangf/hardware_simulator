@@ -160,9 +160,27 @@ abstract class HardwareSimulatorPlatform extends PlatformInterface {
     throw UnimplementedError('performKeyEvent() has not been implemented.');
   }
 
+  Future<void> performKeyEventToWindow({
+    required int windowId,
+    required int keyCode,
+    required bool isDown,
+  }) async {
+    throw UnimplementedError(
+        'performKeyEventToWindow() has not been implemented.');
+  }
+
   /// Inject unicode text on host.
   Future<void> performTextInput(String text) async {
     throw UnimplementedError('performTextInput() has not been implemented.');
+  }
+
+  /// Activate `windowId` then inject unicode text (best effort).
+  Future<void> performTextInputToWindow({
+    required int windowId,
+    required String text,
+  }) async {
+    throw UnimplementedError(
+        'performTextInputToWindow() has not been implemented.');
   }
 
   // Relative mouse movement.
@@ -184,6 +202,15 @@ abstract class HardwareSimulatorPlatform extends PlatformInterface {
       double percentx, double percenty) async {
     throw UnimplementedError(
         'performMouseMoveToWindowPosition() has not been implemented.');
+  }
+  @override
+  Future<void> performMouseMoveToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+  }) async {
+    throw UnimplementedError(
+        'performMouseMoveToWindow() has not been implemented.');
   }
 
   Future<void> performMouseClick(int buttonId, bool isDown) async {
@@ -311,6 +338,15 @@ abstract class HardwareSimulatorPlatform extends PlatformInterface {
   }
 
   Future<void> updateStaticMonitors() async {
-    throw UnimplementedError('updateStaticMonitors() has not been implemented.');
+   throw UnimplementedError('updateStaticMonitors() has not been implemented.');
+ }
+  Future<void> performMouseClickToWindow({
+    required int windowId,
+    required double percentX,
+    required double percentY,
+    required int buttonId,
+    required bool isDown,
+  }) async {
+    throw UnimplementedError('performMouseClickToWindow() has not been implemented.');
   }
 }
