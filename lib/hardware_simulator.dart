@@ -55,16 +55,20 @@ class HWMouse {
         .performMouseMoveAbsl(percentx, percenty, screenId);
   }
 
-  void performMouseMoveToWindow({
+  Future<void> performMouseMoveToWindow({
     required int windowId,
     required double percentX,
     required double percentY,
-  }) {
-    HardwareSimulatorPlatform.instance.performMouseMoveToWindow(
-      windowId: windowId,
-      percentX: percentX,
-      percentY: percentY,
-    );
+  }) async {
+    try {
+      await HardwareSimulatorPlatform.instance.performMouseMoveToWindow(
+        windowId: windowId,
+        percentX: percentX,
+        percentY: percentY,
+      );
+    } on Exception {
+      // Ignore missing platform support.
+    }
   }
 
   void performMouseMoveToWindowPosition(double percentx, double percenty) {
