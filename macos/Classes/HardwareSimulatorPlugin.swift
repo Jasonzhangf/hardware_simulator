@@ -470,7 +470,25 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       guard ownerPID != 0, let runningApp = NSRunningApplication(processIdentifier: ownerPID) else {
           return false
       }
-      return runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+      // Best effort: unhide + activate. Some apps occasionally return `false` here even if they do come frontmost.
+      runningApp.unhide()
+      let ok = runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+      if ok {
+          return true
+      }
+
+      // Fallback: AppleScript activation can work in cases where NSRunningApplication.activate() returns false.
+      if let bundleId = runningApp.bundleIdentifier {
+          let script = "tell application id \"\(bundleId)\" to activate"
+          var error: NSDictionary?
+          if let appleScript = NSAppleScript(source: script) {
+              _ = appleScript.executeAndReturnError(&error)
+              if error == nil {
+                  return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 800)
+              }
+          }
+      }
+      return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 800)
   }
 
   private func windowOwnerPID(cgWindowID: Int) -> pid_t? {
