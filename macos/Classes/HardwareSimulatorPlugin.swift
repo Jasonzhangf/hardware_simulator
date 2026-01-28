@@ -442,6 +442,14 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       }
   }
 
+  func performMouseScrollToWindow(windowId: Int, dx: Double, dy: Double) {
+      if !ensureWindowFocused(cgWindowID: windowId) {
+          NSLog("[HW] mouseScrollToWindow: ensureWindowFocused failed windowId=\(windowId)")
+          return
+      }
+      performMouseScroll(dx: dx, dy: dy)
+  }
+
   // Activate window by CGWindowID
   func activateWindow(cgWindowID: Int) -> Bool {
       let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
@@ -1017,6 +1025,16 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
         result(nil) // 表示成功执行，不返回值
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for Mouse Scroll", details: nil))
+      }
+    case "mouseScrollToWindow":
+      if let args = call.arguments as? [String: Any],
+         let windowId = args["windowId"] as? Int,
+         let dx = args["dx"] as? Double,
+         let dy = args["dy"] as? Double {
+          performMouseScrollToWindow(windowId: windowId, dx: dx, dy: dy)
+          result(nil)
+      } else {
+          result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for mouseScrollToWindow", details: nil))
       }
     case "mouseMoveToWindowPosition":
       if let args = call.arguments as? [String: Any],
