@@ -211,14 +211,52 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
 
   // Inject unicode text on macOS.
   func PerformTextInput(text: String) {
-      guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else {
+      if text.isEmpty { return }
+
+      // For some apps, unicode injection via CGEventKeyboardSetUnicodeString is unreliable,
+      // especially with non-ASCII characters. As a fallback, paste via clipboard.
+      let hasNonAscii = text.unicodeScalars.contains { $0.value > 0x7F }
+      if hasNonAscii {
+          performPasteText(text: text)
           return
       }
-      // Use CGEventKeyboardSetUnicodeString to type unicode text.
-      let utf16 = Array(text.utf16)
-      var chars = utf16
-      event.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
-      event.post(tap: .cghidEventTap)
+
+      guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+            let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+          return
+      }
+      var chars = Array(text.utf16)
+      down.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
+      up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
+      down.post(tap: .cghidEventTap)
+      up.post(tap: .cghidEventTap)
+  }
+
+  // Paste text via clipboard (best-effort). This is used as fallback for non-ASCII input.
+  private func performPasteText(text: String) {
+      let pasteboard = NSPasteboard.general
+      let oldString = pasteboard.string(forType: .string)
+      pasteboard.clearContents()
+      pasteboard.setString(text, forType: .string)
+
+      // kVK_ANSI_V = 0x09
+      let vKey = CGKeyCode(0x09)
+      guard let down = CGEvent(keyboardEventSource: nil, virtualKey: vKey, keyDown: true),
+            let up = CGEvent(keyboardEventSource: nil, virtualKey: vKey, keyDown: false) else {
+          return
+      }
+      down.flags = CGEventFlags.maskCommand
+      up.flags = CGEventFlags.maskCommand
+      down.post(tap: .cghidEventTap)
+      up.post(tap: .cghidEventTap)
+
+      // Restore plain-string clipboard after paste (best-effort). This won't restore rich data.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+          if let s = oldString {
+              pasteboard.clearContents()
+              pasteboard.setString(s, forType: .string)
+          }
+      }
   }
 
   // Activate a target window then inject unicode text (best effort).
