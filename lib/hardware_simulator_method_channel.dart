@@ -298,21 +298,23 @@ class MethodChannelHardwareSimulator extends HardwareSimulatorPlatform {
   }
 
   @override
-  Future<void> performTextInput(String text) async {
-    await methodChannel.invokeMethod('TextInput', {
+  Future<bool> performTextInput(String text) async {
+    final res = await methodChannel.invokeMethod('TextInput', {
       'text': text,
     });
+    return res == null ? true : res == true;
   }
 
   @override
-  Future<void> performTextInputToWindow({
+  Future<bool> performTextInputToWindow({
     required int windowId,
     required String text,
   }) async {
-    await methodChannel.invokeMethod('TextInputToWindow', {
+    final res = await methodChannel.invokeMethod('TextInputToWindow', {
       'windowId': windowId,
       'text': text,
     });
+    return res == null ? true : res == true;
   }
 
   // Relative mouse movement.

@@ -171,12 +171,16 @@ abstract class HardwareSimulatorPlatform extends PlatformInterface {
   }
 
   /// Inject unicode text on host.
-  Future<void> performTextInput(String text) async {
+  ///
+  /// Returns `true` if the platform reports the injection was attempted.
+  Future<bool> performTextInput(String text) async {
     throw UnimplementedError('performTextInput() has not been implemented.');
   }
 
   /// Activate `windowId` then inject unicode text (best effort).
-  Future<void> performTextInputToWindow({
+  ///
+  /// Returns `true` if the platform reports the injection was attempted.
+  Future<bool> performTextInputToWindow({
     required int windowId,
     required String text,
   }) async {

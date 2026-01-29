@@ -214,26 +214,28 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   // Inject unicode text on macOS.
-  func PerformTextInput(text: String) {
-      if text.isEmpty { return }
+  @discardableResult
+  func PerformTextInput(text: String) -> Bool {
+      if text.isEmpty { return false }
 
       // For some apps, unicode injection via CGEventKeyboardSetUnicodeString is unreliable,
       // especially with non-ASCII characters. As a fallback, paste via clipboard.
       let hasNonAscii = text.unicodeScalars.contains { $0.value > 0x7F }
       if hasNonAscii {
           performPasteText(text: text)
-          return
+          return true
       }
 
       guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
             let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-          return
+          return false
       }
       var chars = Array(text.utf16)
       down.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
       up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
       down.post(tap: .cghidEventTap)
       up.post(tap: .cghidEventTap)
+      return true
   }
 
   // Paste text via clipboard (best-effort). This is used as fallback for non-ASCII input.
@@ -264,12 +266,13 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   // Activate a target window then inject unicode text (best effort).
-  func PerformTextInputToWindow(windowId: Int, text: String) {
+  @discardableResult
+  func PerformTextInputToWindow(windowId: Int, text: String) -> Bool {
       if !ensureWindowFocused(cgWindowID: windowId, throttleInterval: 0.25) {
           NSLog("[HW] TextInputToWindow: ensureWindowFocused failed windowId=\(windowId)")
-          return
+          return false
       }
-      PerformTextInput(text: text)
+      return PerformTextInput(text: text)
   }
 
   func performMouseMoveAbsl(x: Double, y: Double, screenId: Int) {
@@ -381,7 +384,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
           return
       }
 
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW] Failed to get window list")
           return
@@ -435,7 +438,8 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   func performMouseMoveToWindow(windowId: Int, percentX: Double, percentY: Double) {
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      // Use `.optionAll` so windows on other Spaces / minimized windows can still be found.
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW] mouseMoveToWindow: Failed to get window list")
           return
@@ -513,7 +517,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
 
   // Activate window by CGWindowID
   func activateWindow(cgWindowID: Int) -> Bool {
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW] Failed to get window list")
           return false
@@ -774,7 +778,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   private func activateWindowAX(cgWindowID: Int) -> Bool {
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW][AX] Failed to get window list")
           return false
@@ -1186,8 +1190,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
     case "TextInput":
       if let args = call.arguments as? [String: Any],
          let text = args["text"] as? String {
-        PerformTextInput(text: text)
-        result(nil)
+        result(PerformTextInput(text: text))
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for TextInput", details: nil))
       }
@@ -1195,8 +1198,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       if let args = call.arguments as? [String: Any],
          let windowId = args["windowId"] as? Int,
          let text = args["text"] as? String {
-        PerformTextInputToWindow(windowId: windowId, text: text)
-        result(nil)
+        result(PerformTextInputToWindow(windowId: windowId, text: text))
       } else {
         result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for TextInputToWindow", details: nil))
       }

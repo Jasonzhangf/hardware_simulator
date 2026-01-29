@@ -23,22 +23,22 @@ class HWKeyboard {
     }
   }
 
-  Future<void> performTextInput(String text) {
+  Future<bool> performTextInput(String text) {
     return HardwareSimulatorPlatform.instance.performTextInput(text);
   }
 
-  Future<void> performTextInputToWindow({
+  Future<bool> performTextInputToWindow({
     required int windowId,
     required String text,
   }) async {
     try {
-      await HardwareSimulatorPlatform.instance.performTextInputToWindow(
+      return await HardwareSimulatorPlatform.instance.performTextInputToWindow(
         windowId: windowId,
         text: text,
       );
-    } on UnimplementedError {
+    } catch (_) {
       // Fallback to non-window-targeted injection on platforms that don't support it.
-      await performTextInput(text);
+      return await performTextInput(text);
     }
   }
 }
