@@ -605,7 +605,9 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
          lastEnsuredOwnerPID == ownerPID,
          (now - lastEnsuredAt) < throttleInterval {
           if soft { return true }
-          return frontmostPID == ownerPID
+          if frontmostPID == ownerPID { return true }
+          // Activation can take a moment; avoid turning rapid click sequences into "never focuses".
+          return waitForFrontmost(ownerPID: ownerPID, timeoutMs: 200)
       }
 
       // Always record attempt timestamp so failures don't spam.
