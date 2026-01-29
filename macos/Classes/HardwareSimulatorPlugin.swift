@@ -561,7 +561,8 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   }
 
   private func windowOwnerPID(cgWindowID: Int) -> pid_t? {
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      // Use `.optionAll` so windows on other Spaces / minimized windows can still be found.
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           return nil
       }
@@ -581,7 +582,8 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       waitForFrontmostApp: Bool = true,
       soft: Bool = false
   ) -> Bool {
-      let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+      // Use `.optionAll` so we can focus windows that are minimized or on another Space.
+      let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
       guard let windowInfoList = windowList as? [[String: Any]] else {
           NSLog("[HW][FOCUS] Failed to get window list")
           return false
