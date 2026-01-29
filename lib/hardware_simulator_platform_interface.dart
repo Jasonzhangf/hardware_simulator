@@ -227,6 +227,8 @@ abstract class HardwareSimulatorPlatform extends PlatformInterface {
     required int windowId,
     required double dx,
     required double dy,
+    double? percentX,
+    double? percentY,
   }) async {
     throw UnimplementedError(
         'performMouseScrollToWindow() has not been implemented.');

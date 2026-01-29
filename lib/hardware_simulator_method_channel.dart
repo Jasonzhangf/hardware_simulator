@@ -367,12 +367,17 @@ class MethodChannelHardwareSimulator extends HardwareSimulatorPlatform {
     required int windowId,
     required double dx,
     required double dy,
+    double? percentX,
+    double? percentY,
   }) async {
-    await methodChannel.invokeMethod('mouseScrollToWindow', {
+    final args = <String, dynamic>{
       'windowId': windowId,
       'dx': dx,
       'dy': dy,
-    });
+    };
+    if (percentX != null) args['percentX'] = percentX;
+    if (percentY != null) args['percentY'] = percentY;
+    await methodChannel.invokeMethod('mouseScrollToWindow', args);
   }
 
   @override

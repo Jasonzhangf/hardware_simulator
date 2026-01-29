@@ -488,7 +488,7 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       }
   }
 
-  func performMouseScrollToWindow(windowId: Int, dx: Double, dy: Double) {
+  func performMouseScrollToWindow(windowId: Int, dx: Double, dy: Double, percentX: Double? = nil, percentY: Double? = nil) {
       // Scroll is high-frequency; avoid repeated frontmost/AX work & log spam.
       // Best-effort: if we recently tried to focus the same window, proceed anyway.
       if !ensureWindowFocused(
@@ -499,6 +499,14 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       ) {
           NSLog("[HW] mouseScrollToWindow: ensureWindowFocused failed windowId=\(windowId)")
           return
+      }
+      if let px = percentX, let py = percentY {
+          // Move cursor into the target window so the wheel event doesn't hit the desktop.
+          performMouseMoveToWindow(
+              windowId: windowId,
+              percentX: max(0.0, min(1.0, px)),
+              percentY: max(0.0, min(1.0, py))
+          )
       }
       performMouseScroll(dx: dx, dy: dy)
   }
@@ -1134,7 +1142,9 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
          let windowId = args["windowId"] as? Int,
          let dx = args["dx"] as? Double,
          let dy = args["dy"] as? Double {
-          performMouseScrollToWindow(windowId: windowId, dx: dx, dy: dy)
+          let percentX = args["percentX"] as? Double
+          let percentY = args["percentY"] as? Double
+          performMouseScrollToWindow(windowId: windowId, dx: dx, dy: dy, percentX: percentX, percentY: percentY)
           result(nil)
       } else {
           result(FlutterError(code: "BAD_ARGS", message: "Missing or incorrect arguments for mouseScrollToWindow", details: nil))

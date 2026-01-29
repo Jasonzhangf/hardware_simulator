@@ -105,12 +105,16 @@ class HWMouse {
     required int windowId,
     required double dx,
     required double dy,
+    double? percentX,
+    double? percentY,
   }) async {
     try {
       await HardwareSimulatorPlatform.instance.performMouseScrollToWindow(
         windowId: windowId,
         dx: dx,
         dy: dy,
+        percentX: percentX,
+        percentY: percentY,
       );
     } on UnimplementedError {
       performMouseScroll(dx, dy);
