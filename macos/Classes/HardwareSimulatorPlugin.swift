@@ -18,6 +18,39 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
   private var lastEnsuredAt: TimeInterval = 0
   private var lastFocusLogAt: TimeInterval = 0
 
+  // Maintain a best-effort modifier state so combo shortcuts (e.g. Shift+Enter)
+  // can be injected reliably by setting flags on non-modifier key events.
+  private var pressedModifierWinCodes: Set<Int> = []
+
+  private func isModifierWinCode(_ code: Int) -> Bool {
+      switch code {
+      case 0xA0, 0xA1, // Shift
+           0xA2, 0xA3, // Control
+           0xA4, 0xA5, // Alt
+           0x5B, 0x5C: // Meta/Command
+          return true
+      default:
+          return false
+      }
+  }
+
+  private func flagsFromPressedModifiers() -> CGEventFlags {
+      var flags: CGEventFlags = []
+      if pressedModifierWinCodes.contains(0xA0) || pressedModifierWinCodes.contains(0xA1) {
+          flags.insert(.maskShift)
+      }
+      if pressedModifierWinCodes.contains(0xA2) || pressedModifierWinCodes.contains(0xA3) {
+          flags.insert(.maskControl)
+      }
+      if pressedModifierWinCodes.contains(0xA4) || pressedModifierWinCodes.contains(0xA5) {
+          flags.insert(.maskAlternate)
+      }
+      if pressedModifierWinCodes.contains(0x5B) || pressedModifierWinCodes.contains(0x5C) {
+          flags.insert(.maskCommand)
+      }
+      return flags
+  }
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "hardware_simulator", binaryMessenger: registrar.messenger)
     let instance = HardwareSimulatorPlugin()
@@ -197,8 +230,20 @@ public class HardwareSimulatorPlugin: NSObject, FlutterPlugin {
       if let macKeyCode = windowsToMacKeyMap[code] {
           let keyCode = CGKeyCode(macKeyCode)
 
+          // Track modifier state so we can set flags on subsequent key events.
+          if isModifierWinCode(code) {
+              if isDown {
+                  pressedModifierWinCodes.insert(code)
+              } else {
+                  pressedModifierWinCodes.remove(code)
+              }
+          }
+
           // Create and post the keyboard event
           let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: isDown)
+          // Apply pressed modifiers as flags for reliability. This makes chorded
+          // shortcuts behave like a real "combo" on macOS.
+          event?.flags = flagsFromPressedModifiers()
           event?.post(tap: .cghidEventTap)
       } else {
           print("Key code \(code) not found in mapping.")
